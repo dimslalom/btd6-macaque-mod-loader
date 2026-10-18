@@ -1,0 +1,35 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Check tag matches VERSION
+        run: |
+          v="$(tr -d ' \n' < VERSION)"
+          [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME does not match VERSION $v"; exit 1; }
+
+      - name: Build
+        run: scripts/build.sh
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="$(tr -d ' \n' < VERSION)"
+          notes="$(awk -v v="$v" '$0 ~ "^## "v{f=1;next} /^## /{f=0} f' CHANGELOG.md)"
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "${notes:-Release $v}" \
+            "dist/MacaqueLoader-$v.dmg" "dist/MacaqueLoader-$v.zip" "dist/macaqueloader-$v.tar.gz" dist/macaqueloader.rb dist/SHA256SUMS

@@ -1,0 +1,124 @@
+#!/bin/bash
+# macaqueloader: command-line front end for the BTD6 Mac Mod Installer.
+# Layouts it understands:
+#   Homebrew / release tarball:  <prefix>/bin/macaqueloader  + <prefix>/libexec/{install.sh,payload/,VERSION}
+#   Built repo (dist/stage):     same layout
+set -u
+
+self="$0"
+while [ -L "$self" ]; do                       # resolve Homebrew's bin symlink
+  link="$(readlink "$self")"
+  case "$link" in /*) self="$link";; *) self="$(dirname "$self")/$link";; esac
+done
+ROOT="$(cd "$(dirname "$self")/.." && pwd)"
+LIBEXEC="$ROOT/libexec"
+INSTALL="$LIBEXEC/install.sh"
+LAUNCHER="$LIBEXEC/payload/launcher.sh"
+VERSION="$(cat "$LIBEXEC/VERSION" 2>/dev/null || echo dev)"
+CONFIG="$HOME/Library/Application Support/macaqueloader/game-path"
+
+usage() {
+  cat <<EOF
+macaqueloader $VERSION: mods (MelonLoader + BTD6 Mod Helper) for Bloons TD 6 on Apple Silicon Macs
+
+Usage: macaqueloader <command> [options]
+
+Commands:
+  app                              Put the MacaqueLoader app in ~/Applications and open it (easiest way)
+  install [--game DIR] [--yes]     Install into the BTD6 game folder (found through Steam if not given)
+  repair  [--game DIR] [--yes]     Re-apply all files; keeps your mods and settings
+  uninstall [--purge] [--yes]      Remove the mod loader (--purge also deletes Mods, Plugins, UserData)
+  launch                           Start modded BTD6 (same as Play in the MacaqueLoader app)
+  status                           Show what's installed and whether it looks healthy
+  logs                             Follow the game logs (Ctrl-C to stop)
+  debug on|off                     Verbose logging and crash backtraces for the next launches
+  version                          Print the version
+
+Start BTD6 from Steam to play without mods.
+EOF
+}
+
+game_dir() {
+  local g=""
+  [ -f "$CONFIG" ] && g="$(cat "$CONFIG")"
+  if [ -z "$g" ] || [ ! -d "$g/BloonsTD6.app" ]; then
+    echo "macaqueloader: no install found. Run: macaqueloader install" >&2; exit 1
+  fi
+  printf '%s\n' "$g"
+}
+
+cmd="${1:-help}"; [ $# -gt 0 ] && shift
+case "$cmd" in
+  app)
+    src="$LIBEXEC/MacaqueLoader.app"; dst="$HOME/Applications/MacaqueLoader.app"
+    [ -d "$src" ] || { echo "macaqueloader: the app isn't part of this install" >&2; exit 1; }
+    mkdir -p "$HOME/Applications"; rm -rf "$dst"; cp -R "$src" "$dst"
+    /usr/bin/xattr -dr com.apple.quarantine "$dst" 2>/dev/null
+    echo "MacaqueLoader is in ~/Applications."; exec /usr/bin/open "$dst";;
+  install|repair)
+    "$INSTALL" install "$@" | while IFS= read -r l; do
+      case "$l" in
+        PROGRESS\ *) p="${l#PROGRESS }"; echo "[${p%% *}%] ${p#* }";;
+        WARN\ *) echo "Note: ${l#WARN }";;
+        ERROR\ *) e="${l#ERROR }"; echo "Error: ${e#* }";;
+        DONE) echo "Done. Start modded BTD6 with: macaqueloader launch (Steam starts it without mods)";;
+        GAME\ *|VERSION\ *|===*|downloading*) ;;
+        *) echo "$l";;
+      esac
+    done; exit "${PIPESTATUS[0]}";;
+  uninstall)
+    "$INSTALL" uninstall "$@" | grep -E "^(ERROR|DONE)" | sed 's/^ERROR [a-z-]* /Error: /; s/^DONE$/Removed. Steam starts BTD6 without mods as usual./'
+    exit "${PIPESTATUS[0]}";;
+  launch)
+    g="$(game_dir)" || exit 1
+    "$LAUNCHER" "$g" | while IFS= read -r l; do
+      case "$l" in
+        "STATE "*) set -- $l
+          [ "$3" = 1 ] && echo "BTD6 was updated ($2): this launch prepares mods again, 1 to 3 minutes."
+          [ "$4" = 0 ] && echo "Note: BTD6 $2 is newer than what was tested; some mods may need updates.";;
+        "STEAM starting") echo "Starting Steam...";;
+        "STEAM sign-in") echo "Waiting for you to sign in to Steam...";;
+        "STARTED "*) echo "Starting modded BTD6. The first launch takes 1 to 3 minutes.";;
+        "RUNNING "*) echo "BTD6 is already running.";;
+        "ERROR "*) echo "Error: ${l#ERROR }. Try: macaqueloader repair";;
+      esac
+    done; exit "${PIPESTATUS[0]}";;
+  status)
+    g="$(game_dir)" || exit 1
+    app="$g/BloonsTD6.app"
+    gv="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Contents/Info.plist" 2>/dev/null)"
+    echo "macaqueloader     $VERSION"
+    echo "game folder   $g"
+    echo "BTD6          ${gv:-unknown}"
+    if [ -f "$g/_modkit/install-info.txt" ]; then sed 's/^/  /' "$g/_modkit/install-info.txt"; fi
+    ok=1
+    for f in melonfix.dylib MelonLoader.Bootstrap.dylib MelonLoader/net6/MelonLoader.dll dotnet/dotnet \
+             Plugins/MelonMacFixes.dll Mods/Btd6ModHelper.dll _modkit/cpp2il-wrapper.sh; do
+      if [ -e "$g/$f" ]; then printf '  ok       %s\n' "$f"; else printf '  MISSING  %s\n' "$f"; ok=0; fi
+    done
+    echo "mods:"; for m in "$g/Mods"/*.dll; do [ -e "$m" ] && echo "  ${m##*/}"; done
+    [ -f "$g/_modkit/debug" ] && echo "debug mode: on"
+    if [ -f "$g/_modkit/game-state" ]; then
+      read -r last_v last_m < "$g/_modkit/game-state"
+      now_m="$(stat -f %m "$app/Contents/Frameworks/GameAssembly.dylib" 2>/dev/null)"
+      [ "$last_m" != "$now_m" ] && echo "note: BTD6 changed since the last modded launch ($last_v -> ${gv:-?}); the next launch re-prepares mods"
+    fi
+    if [ "$ok" = 1 ]; then echo "status: ok"; else echo "status: broken, run: macaqueloader repair"; exit 1; fi;;
+  logs)
+    g="$(game_dir)" || exit 1
+    touch "$g/melonfix.log" "$g/MelonLoader/Latest.log" 2>/dev/null
+    exec tail -n 50 -F "$g/MelonLoader/Latest.log" "$g/melonfix.log";;
+  debug)
+    g="$(game_dir)" || exit 1
+    case "${1:-}" in
+      on) mkdir -p "$g/_modkit"; touch "$g/_modkit/debug"; echo "debug on (next launch opens a live log window)";;
+      off) rm -f "$g/_modkit/debug"; echo "debug off";;
+      *) echo "usage: macaqueloader debug on|off" >&2; exit 2;;
+    esac;;
+  version|--version|-v)
+    echo "$VERSION";;
+  help|--help|-h)
+    usage;;
+  *)
+    echo "macaqueloader: unknown command '$cmd'" >&2; usage >&2; exit 2;;
+esac

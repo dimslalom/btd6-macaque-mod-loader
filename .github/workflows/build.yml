@@ -1,0 +1,36 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Lint shell scripts
+        run: |
+          brew install shellcheck
+          shellcheck -S error bin/macaqueloader installer/install.sh installer/payload/*.sh installer/payload/live-log.command scripts/*.sh
+
+      - name: Build
+        run: scripts/build.sh
+
+      - name: Smoke-test the CLI tarball
+        run: |
+          mkdir -p /tmp/cli && tar -xzf dist/macaqueloader-*.tar.gz -C /tmp/cli
+          /tmp/cli/macaqueloader-*/bin/macaqueloader version
+          /tmp/cli/macaqueloader-*/bin/macaqueloader help
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/

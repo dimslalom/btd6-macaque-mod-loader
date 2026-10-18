@@ -1,0 +1,37 @@
+# Homebrew formula template. scripts/build.sh fills in @VERSION@, @SHA256@ and @REPO@ and writes dist/macaqueloader.rb;
+# copy that file into your tap repo (github.com/<owner>/homebrew-tap, as Formula/macaqueloader.rb).
+class Macaqueloader < Formula
+  desc "Mods (MelonLoader and BTD6 Mod Helper) for Bloons TD 6 on Apple Silicon Macs"
+  homepage "https://github.com/@REPO@"
+  url "https://github.com/@REPO@/releases/download/v@VERSION@/macaqueloader-@VERSION@.tar.gz"
+  sha256 "@SHA256@"
+  license "MIT"
+
+  depends_on arch: :arm64
+  depends_on :macos
+
+  def install
+    libexec.install Dir["libexec/*"]
+    bin.install "bin/macaqueloader"
+    doc.install "README.md", "THIRD_PARTY_NOTICES.md"
+  end
+
+  def caveats
+    <<~EOS
+      Easiest: put the MacaqueLoader app in ~/Applications and let it guide you:
+        macaqueloader app
+      Or from the terminal:
+        macaqueloader install
+        macaqueloader launch
+
+      Rosetta 2 is required: softwareupdate --install-rosetta --agree-to-license
+      `brew uninstall macaqueloader` removes only this tool. Run `macaqueloader uninstall` first
+      to remove the mod loader from the game folder.
+    EOS
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/macaqueloader version")
+    assert_match "Usage", shell_output("#{bin}/macaqueloader help")
+  end
+end

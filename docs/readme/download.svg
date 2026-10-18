@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="276" height="56" viewBox="0 0 276 56" role="img" aria-label="Download for macOS">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#34C759"/>
+      <stop offset="1" stop-color="#28A745"/>
+    </linearGradient>
+  </defs>
+  <rect width="276" height="56" rx="28" fill="url(#g)"/>
+  <g fill="#fff">
+    <!-- Apple-style download arrow in a circle -->
+    <circle cx="36" cy="28" r="12" fill="none" stroke="#fff" stroke-width="2.4"/>
+    <path d="M36 21.5v10.5m-4.6-4.4 4.6 4.6 4.6-4.6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="58" y="25" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="600" opacity="0.9">DOWNLOAD FOR</text>
+    <text x="58" y="42" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="18" font-weight="700">macOS · Apple Silicon</text>
+  </g>
+</svg>

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key><string>MacaqueLoader</string>
+	<key>CFBundleIdentifier</key><string>io.github.dimslalom.macaqueloader</string>
+	<key>CFBundleName</key><string>MacaqueLoader</string>
+	<key>CFBundleDisplayName</key><string>MacaqueLoader</string>
+	<key>CFBundlePackageType</key><string>APPL</string>
+	<key>CFBundleShortVersionString</key><string>@VERSION@</string>
+	<key>CFBundleVersion</key><string>@VERSION@</string>
+	<key>CFBundleIconFile</key><string>AppIcon</string>
+	<key>LSMinimumSystemVersion</key><string>13.0</string>
+	<key>LSApplicationCategoryType</key><string>public.app-category.games</string>
+	<key>NSHighResolutionCapable</key><true/>
+	<key>NSDocumentsFolderUsageDescription</key><string>Your Steam library is in Documents. MacaqueLoader installs and starts the mod loader next to Bloons TD 6.</string>
+	<key>NSDesktopFolderUsageDescription</key><string>Your Steam library is on the Desktop. MacaqueLoader installs and starts the mod loader next to Bloons TD 6.</string>
+	<key>NSDownloadsFolderUsageDescription</key><string>Your Steam library is in Downloads. MacaqueLoader installs and starts the mod loader next to Bloons TD 6.</string>
+	<key>NSRemovableVolumesUsageDescription</key><string>Your Steam library is on an external drive. MacaqueLoader installs and starts the mod loader next to Bloons TD 6.</string>
+	<key>NSNetworkVolumesUsageDescription</key><string>Your Steam library is on a network drive. MacaqueLoader installs and starts the mod loader next to Bloons TD 6.</string>
+	<key>NSAppleEventsUsageDescription</key><string>Used to install Rosetta (macOS asks for your password).</string>
+</dict>
+</plist>

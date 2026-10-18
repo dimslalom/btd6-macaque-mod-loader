@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>disable</Nullable>
+    <AssemblyName>MelonMacFixes</AssemblyName>
+    <RootNamespace>MelonMacFixes</RootNamespace>
+    <Version>1.2.0</Version>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <!-- MelonLoader 0.7.3 reference assemblies. scripts/build.sh passes -p:MLDir=<cache>; for IDE use, copy them into refs/ (git-ignored). -->
+    <MLDir Condition="'$(MLDir)' == ''">$(MSBuildThisFileDirectory)refs</MLDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="MelonLoader"><HintPath>$(MLDir)/MelonLoader.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Il2CppInterop.Runtime"><HintPath>$(MLDir)/Il2CppInterop.Runtime.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>$(MLDir)/0Harmony.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

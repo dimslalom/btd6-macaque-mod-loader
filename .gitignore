@@ -1,0 +1,11 @@
+# build output
+/dist/
+/.cache/
+src/MacFixes/bin/
+src/MacFixes/obj/
+src/MacFixes/out/
+src/MacFixes/refs/
+*.dylib
+
+# macOS
+.DS_Store
