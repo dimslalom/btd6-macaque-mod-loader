@@ -10,9 +10,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/dimslalom/btd6-macaque-mod-loader/releases/latest"><img src="https://img.shields.io/github/v/release/dimslalom/btd6-macaque-mod-loader?label=release&color=34C759" alt="Latest release"></a>
-  <a href="https://github.com/dimslalom/btd6-macaque-mod-loader/releases"><img src="https://img.shields.io/github/downloads/dimslalom/btd6-macaque-mod-loader/total?color=0A84FF" alt="Downloads"></a>
-  <a href="https://github.com/dimslalom/btd6-macaque-mod-loader/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/dimslalom/btd6-macaque-mod-loader/build.yml?branch=main&label=build" alt="Build status"></a>
+  <a href="https://github.com/dimslalom/btd6-macaque-mod-loader/releases"><img src="https://img.shields.io/badge/releases-download-34C759" alt="Download releases"></a>
+  <a href="https://github.com/dimslalom/btd6-macaque-mod-loader/actions/workflows/build.yml"><img src="https://img.shields.io/badge/build-GitHub%20Actions-0A84FF" alt="View build workflow"></a>
   <img src="https://img.shields.io/badge/macOS-13%2B%20·%20Apple%20Silicon-black?logo=apple" alt="macOS 13+ on Apple Silicon">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
 </p>
