@@ -116,7 +116,7 @@ The second command puts MacaqueLoader in `~/Applications` and opens it.
 
 ## Requirements
 
-| | |
+| Needs | Details |
 |---|---|
 | Mac | Apple Silicon (M1 or newer) |
 | macOS | 13 Ventura or newer (tested on macOS 27) |
