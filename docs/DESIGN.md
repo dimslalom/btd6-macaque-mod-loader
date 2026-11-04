@@ -81,8 +81,8 @@ library is protected:
   children, so one grant covers install, repair and play.
 - The app's Info.plist carries the folder usage descriptions, so macOS shows its standard prompt. Before that, the app
   shows a replica of the prompt with "Allow" pointed out.
-- If access was denied, the app shows an animated mini System Settings (the switch in Files & Folders, or dragging the
-  app into Full Disk Access when it isn't listed), opens that page, and polls until access works.
+- If access was denied, the app shows an animated mini System Settings (the switch in Files & Folders), opens that
+  page, and polls until access works. Full Disk Access is never suggested.
 - What didn't work: a bash-script launcher app (no usage descriptions, background-only) got denied silently with no
   prompt, and an ad-hoc signature changes with every build, so a script app's grant didn't survive reinstalls. Starting
   the game through LaunchServices (`open --env`) to avoid the launcher needing access fails, because MelonLoader then
@@ -119,7 +119,7 @@ again.
 
 - **BTD6 update:** only `BloonsTD6.app` changes. The launcher records the game version and GameAssembly timestamp in
   `_modkit/game-state` and notifies on change; MelonLoader regenerates assemblies (hash check), the wrapper re-thins
-  GameAssembly (timestamp check), Mod Helper's UpdaterPlugin fetches a matching Mod Helper. melonfix locates
+  GameAssembly (when its timestamp differs from the cached copy's), Mod Helper's UpdaterPlugin fetches a matching Mod Helper. melonfix locates
   everything at runtime (delta scan, symbol names).
 - **MelonLoader:** pinned to 0.7.3 because melonfix depends on its internals (plthook behaviour, `NativeHookAttach`
   export, ProcessModulesFix). A new MelonLoader version needs re-testing before the pin moves.
