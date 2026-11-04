@@ -116,7 +116,7 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/macaqueloader.XXXXXX")" || fail install "Could
 trap 'rm -rf "$TMP"' EXIT
 fetch() {  # what url dest sha256: downloads and verifies; a mismatch is its own error, never "check your connection"
   echo "downloading $2"
-  /usr/bin/curl -fsSL --retry 3 --connect-timeout 20 -o "$3" "$2" || fail download "Downloading $1 failed. Check your internet connection."
+  /usr/bin/curl -fsSL --retry 3 --connect-timeout 20 --speed-limit 1024 --speed-time 60 -o "$3" "$2" || fail download "Downloading $1 failed. Check your internet connection."
   local got; got="$(/usr/bin/shasum -a 256 "$3" | awk '{print $1}')"
   if [ "$got" != "$4" ]; then
     echo "checksum mismatch for $2: got $got, expected $4"; rm -f "$3"
