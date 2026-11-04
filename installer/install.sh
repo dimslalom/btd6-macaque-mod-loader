@@ -37,7 +37,7 @@ while [ $# -gt 0 ]; do
     uninstall) MODE=uninstall; shift;;
     detect) MODE=detect; shift;;
     --uninstall) MODE=uninstall; shift;;
-    --game) GAME="$2"; shift 2;;
+    --game) [ $# -ge 2 ] || { echo "--game needs a folder"; exit 2; }; GAME="$2"; shift 2;;
     --yes|-y) YES=1; shift;;
     --purge) PURGE=1; shift;;
     --no-ui) shift;;                              # accepted for compatibility
@@ -50,7 +50,8 @@ warn() { echo "WARN $1"; }
 fail() { echo "ERROR $1 $2"; exit 1; }
 confirm() {  # only asks when run interactively without --yes
   [ "$YES" = 1 ] || [ ! -t 0 ] && return 0
-  printf '%s [y/N] ' "$1"; read -r a; [ "$a" = y ] || [ "$a" = Y ]
+  printf '%s [y/N] ' "$1" > /dev/tty; read -r a;   # stdout may be filtered line by line, which would hide the prompt
+  [ "$a" = y ] || [ "$a" = Y ]
 }
 
 # ---------- locate the game ----------
@@ -64,7 +65,7 @@ find_game() {
     is_game_dir "$cand" && echo "$cand"
   done | awk '!seen[$0]++' | head -1
 }
-[ -z "$GAME" ] && [ "$MODE" != install ] && [ -f "$CONFIG_DIR/game-path" ] && GAME="$(cat "$CONFIG_DIR/game-path")"
+[ -z "$GAME" ] && [ -f "$CONFIG_DIR/game-path" ] && is_game_dir "$(cat "$CONFIG_DIR/game-path")" && GAME="$(cat "$CONFIG_DIR/game-path")"
 [ -z "$GAME" ] && GAME="$(find_game)"
 [ -n "$GAME" ] && is_game_dir "$GAME" || fail no-game "Bloons TD 6 wasn't found. Install it in Steam, or choose its folder."
 GAME="$(cd "$GAME" && pwd)"
