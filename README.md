@@ -144,7 +144,7 @@ if it's missing, install it first with `softwareupdate --install-rosetta --agree
 |---|---|
 | Mac | Apple Silicon (M1 or newer) |
 | macOS | 13 Ventura or newer (tested on macOS 27) |
-| Game | Bloons TD 6 from **Steam** (tested with 57.2) |
+| Game | Bloons TD 6 from **Steam** (tested with 57.2 and 57.4) |
 | Rosetta 2 | Required; MacaqueLoader shows the one-line Terminal command to install it |
 
 ## FAQ
