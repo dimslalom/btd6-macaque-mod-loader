@@ -222,10 +222,15 @@ final class AppModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 let alive = gamePID > 0 ? kill(gamePID, 0) == 0 : Engine.gameRunning
                 gameRunning = alive
-                if screen == .preparing, let text = try? String(contentsOf: log, encoding: .utf8) {
+                // Until MelonLoader starts this launch's log, the file is the last session's, with every marker in it.
+                let written = (try? FileManager.default.attributesOfItem(atPath: log.path))?[.modificationDate] as? Date
+                if screen == .preparing, let written, written >= started, let data = try? Data(contentsOf: log) {
+                    let text = String(decoding: data, as: UTF8.self)
                     for i in prepSteps.indices where !prepSteps[i].done {
                         if prepSteps[i].markers.contains(where: { text.contains($0) }) { prepSteps[i].done = true }
                     }
+                    // The last step's markers come from Mod Helper; without it nothing would ever finish the list.
+                    if prepSteps[2].done, !mods.contains(where: { $0.name == "Btd6ModHelper" }) { prepSteps[3].done = true }
                     if prepSteps.allSatisfy(\.done) { sawWindow = true; screen = .playing }
                 }
                 if !alive {
@@ -273,6 +278,6 @@ struct PrepStep: Identifiable, Equatable {
         PrepStep(id: 0, title: "Starting MelonLoader", symbol: "power", markers: ["Loading Il2CppAssemblyGenerator", "Assembly Generation"]),
         PrepStep(id: 1, title: "Reading the game", symbol: "magnifyingglass", markers: ["Assembly Generation Successful", "Mods loaded", "Mod loaded"]),
         PrepStep(id: 2, title: "Loading mods", symbol: "puzzlepiece.extension", markers: ["Mods loaded", "Mod loaded"]),
-        PrepStep(id: 3, title: "Opening the game", symbol: "gamecontroller", markers: ["Registering ModContent", "scene initialized: TitleScreenUI", "Finished getting mods"]),
+        PrepStep(id: 3, title: "Opening the game", symbol: "gamecontroller", markers: ["Registering ModContent", "Finished getting mods"]),
     ]
 }
