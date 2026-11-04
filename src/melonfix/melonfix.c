@@ -1,4 +1,6 @@
-// melonfix v14: makes MelonLoader 0.7.3 (macOS x64) work for BTD6 under Rosetta. Injected before the Bootstrap.
+// melonfix v15: makes MelonLoader 0.7.3 (macOS x64) work for BTD6 under Rosetta. Injected before the Bootstrap.
+//  v15: a disabled retarget no longer disables the ones after it; hooks only name their target in debug mode (a full
+//       symbol table walk each); the log is append-only, so native writes can't overwrite the managed crash stack.
 //  v14: a detour candidate must live in executable memory before it is called; symbol retargets ignore compiler-split
 //       ".cold." fragments, accept every overload of the wrong function and require a unique right one; the method
 //       map can't spin when full; lazily built state is mutex-protected.
@@ -34,10 +36,10 @@ static const struct mach_header_64 *up_mh = NULL; static intptr_t up_slide = 0;
 
 typedef void* (*dlsym_fn)(void*, const char*);
 static int fd = -1, dbg = 0;   // dbg: MELONFIX_DEBUG=1 enables verbose logging (lgv)
-static void lg(const char *fmt, ...) {
+__attribute__((format(printf, 1, 2))) static void lg(const char *fmt, ...) {
   if (fd < 0) { const char *d = getenv("MELONFIX_DIR"); char p[2048];
     snprintf(p, sizeof p, "%s/melonfix.log", d ? d : "/tmp");
-    fd = open(p, O_WRONLY|O_CREAT|O_TRUNC, 0644); }
+    fd = open(p, O_WRONLY|O_CREAT|O_TRUNC|O_APPEND, 0644); }
   char b[1024]; va_list ap; va_start(ap, fmt);
   int n = vsnprintf(b, sizeof b, fmt, ap); va_end(ap);
   if (fd >= 0 && n > 0) write(fd, b, n < (int)sizeof b ? n : (int)sizeof b - 1);
@@ -188,7 +190,8 @@ static void find_detour(void) {
       lg("lone misplaced hook: dlsym hook at %p (delta 0x%lx) = %p\n", (void*)only_addr, (long)((intptr_t)only_addr - (intptr_t)gaddr[0]), (void*)only); }
     else lg("%d changed code slots in UnityPlayer data and no consistent delta: not guessing\n", n);
   }
-  lg(detour ? "detour found %p (%zu data candidates rejected)\n" : "detour NOT found (%zu data candidates rejected)\n", (void*)detour, rejected);
+  if (detour) lg("detour found %p (%zu data candidates rejected)\n", (void*)detour, rejected);
+  else lg("detour NOT found (%zu data candidates rejected)\n", rejected);
   if (!detour || dbg) {   // diagnostics: where did MelonLoader's four writes land, if anywhere?
     for (int g = 0; g < 4; g++) { if (!gaddr[g]) continue; uintptr_t v = *(uintptr_t*)gaddr[g]; char a[300];
       lg("  slot %s at %p = %p (%s)%s\n", gname[g], (void*)gaddr[g], (void*)v, nm(v, a, 300), changed_anon(gaddr[g]) ? " CHANGED" : ""); }
@@ -295,7 +298,7 @@ static struct { void *(*domain_get)(void); void **(*domain_get_assemblies)(void*
   uint32_t (*method_get_param_count)(void*); void *(*method_get_param)(void*, uint32_t); void *(*method_get_return_type)(void*);
   const char *(*method_get_name)(void*); void *(*method_get_class)(void*); const char *(*class_get_name)(void*);
   int (*type_get_type)(void*); void *(*class_from_type)(void*); int (*class_is_enum)(void*); int32_t (*class_value_size)(void*, uint32_t*);
-  void *(*class_get_fields)(void*, void**); void *(*field_get_type)(void*); int (*type_is_static)(void*); size_t (*field_get_offset)(void*);
+  void *(*class_get_fields)(void*, void**); void *(*field_get_type)(void*); size_t (*field_get_offset)(void*);
   int (*field_get_flags)(void*); int (*class_is_valuetype)(void*); } il;
 static int il_ok = -1;
 static int il_init(void) {
@@ -400,11 +403,12 @@ static void w_hook_attach(void **target, void *detour) {
   pthread_mutex_lock(&hmu);
   if (!syms_done) resolve_retargets();
   if (target) {
-    for (size_t i = 0; i < NRETARGET && rt_right[i]; i++)
+    for (size_t i = 0; i < NRETARGET; i++) {
+      if (!rt_right[i]) continue;
       for (int j = 0; j < rt_nwrong[i]; j++)
         if ((uintptr_t)*target == rt_wrong[i][j]) {
-          lg("hook retarget %p -> %p: %s\n", *target, (void*)rt_right[i], retargets[i].what); *target = (void*)rt_right[i]; i = NRETARGET - 1; break; }
-    char b[512]; name_addr((uintptr_t)*target, b, sizeof b); lgv("hook %s\n", b);
+          lg("hook retarget %p -> %p: %s\n", *target, (void*)rt_right[i], retargets[i].what); *target = (void*)rt_right[i]; i = NRETARGET - 1; break; } }
+    if (dbg) { char b[512]; name_addr((uintptr_t)*target, b, sizeof b); lg("hook %s\n", b); }
     mp_build(); void *m = mp_get((uintptr_t)*target); char why[512];
     if (m && !abi_fixed && abi_mismatch(m, why, sizeof why)) {
       lg("SKIP hook %s::%s (SysV struct ABI not supported by Il2CppInterop trampoline): %s\n",
@@ -543,15 +547,14 @@ __attribute__((used)) static struct { const void *r; const void *o; } interposer
 
 __attribute__((constructor)) static void init(void) {
   // Only act inside the game itself; child tools (Cpp2IL etc.) must run clean.
-  const char *self = _dyld_get_image_name(0); int is_game = 0;
+  int is_game = 0;
   for (uint32_t k = 0; k < _dyld_image_count(); k++) { const struct mach_header *h = _dyld_get_image_header(k);
     if (h && h->filetype == MH_EXECUTE) { const char *n = _dyld_get_image_name(k); is_game = n && strstr(n, "/BloonsTD6.app/Contents/MacOS/") != NULL; break; } }
-  (void)self;
   // Stop child processes from inheriting the injection (dyld has already read these for this process).
   setenv("DYLD_INSERT_LIBRARIES", "", 1);
   if (!is_game) return;
   { const char *e = getenv("MELONFIX_DEBUG"); dbg = e && *e && *e != '0'; }
-  lg("melonfix v14 loaded%s\n", dbg ? " (debug)" : "");
+  lg("melonfix v15 loaded%s\n", dbg ? " (debug)" : "");
   { int p1 = -1, p2 = -1; uintptr_t heap = (uintptr_t)malloc(16); int m1 = is_mapped((uintptr_t)&init, &p1), m2 = is_mapped(heap, &p2);
     lg("self-test: own code mapped=%d prot=%d, heap mapped=%d prot=%d, garbage mapped=%d\n", m1, p1, m2, p2, is_mapped(0x3f8000003f800000ULL, NULL));
     free((void*)heap); }
