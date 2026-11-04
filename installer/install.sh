@@ -4,7 +4,7 @@
 #
 # Usage: install.sh [install|uninstall|detect] [--game DIR] [--yes] [--purge]
 #   install    install, or repair an existing install (keeps mods and settings)
-#   uninstall  remove the mod loader (--purge also removes Mods, Plugins, UserData, UserLibs)
+#   uninstall  remove the mod loader (--purge also removes Mods, Plugins, UserData, UserLibs, Btd6ModHelper)
 #   detect     print what was found, change nothing
 # Output lines for the app (anything else is log text):
 #   GAME <dir> | VERSION <btd6 version> | PROGRESS <0-100> <text> | WARN <text> | ERROR <code> <text> | DONE
@@ -92,7 +92,11 @@ if [ "$MODE" = uninstall ]; then
   # Finder can recreate .DS_Store files while we delete; give it a second pass.
   if [ -d "$GAME/MelonLoader" ] || [ -d "$GAME/dotnet" ]; then sleep 1; rm -rf "$GAME/MelonLoader" "$GAME/dotnet"; fi
   rmdir "$GAME/_modkit" 2>/dev/null
-  if [ "$PURGE" = 1 ]; then progress 70 "Removing mods"; rm -rf "$GAME/Mods" "$GAME/Plugins" "$GAME/UserData" "$GAME/UserLibs"; fi
+  if [ "$PURGE" = 1 ]; then
+    progress 70 "Removing mods"
+    rm -rf "$GAME/Mods" "$GAME/Plugins" "$GAME/UserData" "$GAME/UserLibs" "$GAME/Btd6ModHelper"
+    rmdir "$GAME/Jukebox" 2>/dev/null                 # may hold the user's own music, so only when empty
+  fi
   rm -f "$CONFIG_DIR/game-path"; rmdir "$CONFIG_DIR" 2>/dev/null
   progress 100 "Removed"
   echo DONE; exit 0

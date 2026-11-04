@@ -27,7 +27,7 @@ Commands:
   app                              Put the MacaqueLoader app in ~/Applications and open it (easiest way)
   install [--game DIR] [--yes]     Install into the BTD6 game folder (found through Steam if not given)
   repair  [--game DIR] [--yes]     Re-apply all files; keeps your mods and settings
-  uninstall [--purge] [--yes]      Remove the mod loader (--purge also deletes Mods, Plugins, UserData)
+  uninstall [--purge] [--yes]      Remove the mod loader (--purge also deletes Mods, Plugins, UserData, mod settings)
   launch                           Start modded BTD6 (same as Play in the MacaqueLoader app)
   status                           Show what's installed and whether it looks healthy
   logs                             Follow the game logs (Ctrl-C to stop)
