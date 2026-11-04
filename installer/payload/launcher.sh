@@ -69,6 +69,7 @@ if ! steam_running; then
 fi
 echo "STEAM ready"
 
+mkdir -p "$GAME/_modkit"
 DEBUG=0; [ -f "$GAME/_modkit/debug" ] && DEBUG=1
 INSERT="$GAME/melonfix.dylib:$GAME/MelonLoader.Bootstrap.dylib"
 {
@@ -87,6 +88,6 @@ nohup /usr/bin/arch -x86_64 \
   -e DOTNET_ROOT="$GAME/dotnet" \
   "$BIN" >> "$LOG" 2>&1 &
 # Recorded only once the game is actually starting, so a failed launch still counts as "updated" next time.
-mkdir -p "$GAME/_modkit"; echo "${NOWV:-unknown} ${NOWM:-0}" > "$STATE"
+echo "${NOWV:-unknown} ${NOWM:-0}" > "$STATE"
 echo "STARTED $!"
 exit 0
