@@ -103,7 +103,8 @@ if [ "$MODE" = uninstall ]; then
 fi
 
 # ---------- preflight ----------
-[ "$(uname -m)" = arm64 ] || fail intel "This Mac has an Intel processor. Only Apple Silicon Macs are supported."
+# Not uname -m: it says x86_64 in a shell running under Rosetta.
+[ "$(/usr/sbin/sysctl -n hw.optional.arm64 2>/dev/null)" = 1 ] || fail intel "This Mac has an Intel processor. Only Apple Silicon Macs are supported."
 /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null || fail no-rosetta "Rosetta 2 is not installed."
 case "$GAME" in *:*) fail install "The game folder path contains a colon, which the launcher can't pass to dyld: $GAME";; esac
 case " $KNOWN_GOOD_GAME_VERSIONS " in *" ${GAMEVER%.*} "*|*" $GAMEVER "*) ;; *)
