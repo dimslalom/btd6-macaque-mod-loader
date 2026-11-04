@@ -31,10 +31,10 @@ final class AppModel: ObservableObject {
     @Published var untestedGameVersion = false
     @Published var debugMode = false
     @Published var prepSteps: [PrepStep] = PrepStep.all
-    @Published var gameRunning = false
 
     private var pollTask: Task<Void, Never>?
     private var gamePID: pid_t = 0
+    private var launching = false
     private let defaults = UserDefaults.standard
 
     // MARK: Checks
@@ -71,7 +71,7 @@ final class AppModel: ObservableObject {
         needsUpdate = installedVersion != Engine.appVersion && Engine.appVersion != "dev"
         if needsUpdate { screen = .install; return }
         screen = Engine.gameRunning ? .playing : .home
-        if Engine.gameRunning { watchGame() }
+        if Engine.gameRunning { gamePID = 0; watchGame() }   // not ours: any PID from an earlier launch is stale
     }
 
     func refresh() {
@@ -186,9 +186,11 @@ final class AppModel: ObservableObject {
     // MARK: Play
 
     func play() {
-        guard let game else { return }
+        guard let game, !launching else { return }
+        launching = true
         prepSteps = PrepStep.all
         Task {
+            defer { launching = false }
             var started = false; var updated = false; var problem: String?
             _ = await Engine.script("payload/launcher.sh", [game.path]) { line in
                 let f = line.split(separator: " ")
@@ -224,7 +226,6 @@ final class AppModel: ObservableObject {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 let alive = gamePID > 0 ? kill(gamePID, 0) == 0 : Engine.gameRunning
-                gameRunning = alive
                 // Until MelonLoader starts this launch's log, the file is the last session's, with every marker in it.
                 let written = (try? FileManager.default.attributesOfItem(atPath: log.path))?[.modificationDate] as? Date
                 if screen == .preparing, let written, written >= started, let data = try? Data(contentsOf: log) {
