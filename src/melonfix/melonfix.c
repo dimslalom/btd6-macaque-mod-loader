@@ -1,4 +1,7 @@
-// melonfix v13: makes MelonLoader 0.7.3 (macOS x64) work for BTD6 under Rosetta. Injected before the Bootstrap.
+// melonfix v14: makes MelonLoader 0.7.3 (macOS x64) work for BTD6 under Rosetta. Injected before the Bootstrap.
+//  v14: a detour candidate must live in executable memory before it is called; symbol retargets ignore compiler-split
+//       ".cold." fragments, accept every overload of the wrong function and require a unique right one; the method
+//       map can't spin when full; lazily built state is mutex-protected.
 //  1. routes UnityPlayer's dlsym lookups into MelonLoader's SymbolDetour (its plthook writes land at slot+delta)
 //  2. swaps the main executable to dyld image 0 for MelonLoader's image queries
 //  3. reports GameAssembly's exact size to ProcessModulesFix (stops Il2CppInterop's scan from running off the end)
@@ -25,6 +28,8 @@
 #include <mach-o/dyld.h>
 #include <mach-o/loader.h>
 #include <mach-o/nlist.h>
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
 static const struct mach_header_64 *up_mh = NULL; static intptr_t up_slide = 0;
 
 typedef void* (*dlsym_fn)(void*, const char*);
@@ -44,8 +49,26 @@ static seg_t segs[32]; static int nsegs = 0;
 static uintptr_t up_lo = 0, up_hi = 0;
 static dlsym_fn detour = NULL;
 static int searched = 0;
-static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;    // find_detour
+static pthread_mutex_t hmu = PTHREAD_MUTEX_INITIALIZER;   // hook retargets, method map, dyld remap, fake GA header
 void* fix_dlsym(void *h, const char *n);
+
+// A detour found by scanning memory is only ever called if it points into mapped memory (garbage such as float
+// constants never is). *prot receives the mapping's protection for the log; it is not required to include execute,
+// because Rosetta's view of translated code pages is not something to rely on.
+static int is_mapped(uintptr_t a, int *prot) {
+  mach_vm_address_t addr = a; mach_vm_size_t size = 0; vm_region_basic_info_data_64_t info;
+  mach_msg_type_number_t cnt = VM_REGION_BASIC_INFO_COUNT_64; mach_port_t obj = MACH_PORT_NULL;
+  if (prot) *prot = -1;
+  if (mach_vm_region(mach_task_self(), &addr, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info, &cnt, &obj) != KERN_SUCCESS) return 0;
+  if (obj != MACH_PORT_NULL) mach_port_deallocate(mach_task_self(), obj);
+  if (!(addr <= a && a < addr + size)) return 0;
+  if (prot) *prot = info.protection;
+  return 1;
+}
+// Only ever call something that is in an executable mapping. Rosetta reports code pages as executable (the self-test
+// at startup checks this, see melonfix.log); data constants such as 0x3f8000003f800000 or 0x7fff00007fff are not.
+static int is_exec(uintptr_t a) { int p = 0; return is_mapped(a, &p) && (p & VM_PROT_EXECUTE) != 0; }
 
 static int is_dlsym_ptr(uintptr_t v) {
   if (!v) return 0;
@@ -73,11 +96,14 @@ static void snapshot_unityplayer(void) {
         const struct segment_command_64 *sg = (const void*)p;
         if (isup) { up_mh = mh; up_slide = slide; }
         if (isup && !strcmp(sg->segname, "__TEXT")) { up_lo = sg->vmaddr + slide; up_hi = up_lo + sg->vmsize; }
+        if (!strncmp(sg->segname, "__DATA", 6) && !(nsegs < 32 && sg->vmsize < (64u<<20)))
+          lgv("skip %s %s %p size=%llu (too big or too many)\n", bn, sg->segname, (void*)(sg->vmaddr + slide), (unsigned long long)sg->vmsize);
         if (!strncmp(sg->segname, "__DATA", 6) && nsegs < 32 && sg->vmsize < (64u<<20)) {
-          seg_t *s = &segs[nsegs++]; s->start = sg->vmaddr + slide; s->size = sg->vmsize;
-          s->snap = malloc(s->size); memcpy(s->snap, (void*)s->start, s->size);
-          s->skip = strstr(name, "MelonLoader.Bootstrap") != NULL; s->img = strdup(bn);
-          lgv("snap %s %s %p size=%zu\n", bn, sg->segname, (void*)s->start, s->size);
+          seg_t *s = &segs[nsegs]; s->start = sg->vmaddr + slide; s->size = sg->vmsize;
+          s->snap = malloc(s->size);
+          if (s->snap) { memcpy(s->snap, (void*)s->start, s->size);
+            s->skip = strstr(name, "MelonLoader.Bootstrap") != NULL; s->img = strdup(bn); nsegs++;
+            lgv("snap %s %s %p size=%zu\n", bn, sg->segname, (void*)s->start, s->size); }
         }
       }
       p += lc->cmdsize;
@@ -127,12 +153,13 @@ static void find_detour(void) {
           char a[300]; uintptr_t v = slots[j];
           for (int g = 0; g < 4; g++) if (!strcmp(name, gname[g]) && !gaddr[g]) gaddr[g] = (uintptr_t)&slots[j];
           lgv("slot %s,%s[%zu] %s = %p (%s)\n", sec->segname, sec->sectname, j, name, (void*)v, nm(v, a, 300));
-          if (!strcmp(name, "_dlsym") && v && !is_dlsym_ptr(v) && !detour) {
+          if (!strcmp(name, "_dlsym") && v && !is_dlsym_ptr(v) && !detour && is_exec(v)) {
             Dl_info di; if (!dladdr((void*)v, &di) || (di.dli_fname && strstr(di.dli_fname, "MelonLoader"))) detour = (dlsym_fn)v; }
         }
       } }
     p += lc->cmdsize; }
   // MelonLoader's plthook writes to (correct slot + constant delta) on this build. Find that delta.
+  size_t rejected = 0;
   if (!detour && gaddr[0]) {
     for (int i = 0; i < nsegs && !detour; i++) { if (segs[i].skip) continue;
       size_t cnt = segs[i].size / 8;
@@ -141,23 +168,53 @@ static void find_detour(void) {
         if (!changed_anon(addr)) continue;
         intptr_t d = (intptr_t)addr - (intptr_t)gaddr[0]; int ok = 1, others = 0;
         for (int g = 1; g < 4; g++) if (gaddr[g]) { others++; if (!changed_anon(gaddr[g] + d)) { ok = 0; break; } }
-        if (ok && others >= 2) { detour = (dlsym_fn)*(uintptr_t*)addr;
+        if (ok && others >= 2) { uintptr_t cand = *(uintptr_t*)addr;
+          if (!is_exec(cand)) { rejected++; continue; }   // data that merely changed since the snapshot
+          detour = (dlsym_fn)cand;
           lg("misplaced hook delta=%ld (0x%lx) dlsym hook at %p = %p\n", (long)d, (long)d, (void*)addr, (void*)detour);
           for (int g = 1; g < 4; g++) if (gaddr[g]) lgv("  %s hook at %p = %p\n", gname[g], (void*)(gaddr[g]+d), (void*)*(uintptr_t*)(gaddr[g]+d)); }
       } }
   }
-  lg(detour ? "detour found %p\n" : "detour NOT found\n", (void*)detour);
+  // MelonLoader's fopen/dup2/vfprintf hooks are optional (player-log capture), so the delta check above can have
+  // nothing to agree with. If exactly one slot in UnityPlayer's data changed to an anonymous executable pointer,
+  // that is the misplaced dlsym hook; with more than one we don't guess.
+  if (!detour && gaddr[0]) {
+    uintptr_t only = 0, only_addr = 0; int n = 0;
+    for (int i = 0; i < nsegs; i++) { if (segs[i].skip || !strstr(segs[i].img, "UnityPlayer")) continue;
+      for (size_t j = 0; j < segs[i].size / 8; j++) { uintptr_t addr = segs[i].start + j * 8;
+        if (!changed_anon(addr)) continue; uintptr_t v = *(uintptr_t*)addr; if (!is_exec(v)) continue;
+        n++; only = v; only_addr = addr; } }
+    if (n == 1) { detour = (dlsym_fn)only;
+      lg("lone misplaced hook: dlsym hook at %p (delta 0x%lx) = %p\n", (void*)only_addr, (long)((intptr_t)only_addr - (intptr_t)gaddr[0]), (void*)only); }
+    else lg("%d changed code slots in UnityPlayer data and no consistent delta: not guessing\n", n);
+  }
+  lg(detour ? "detour found %p (%zu data candidates rejected)\n" : "detour NOT found (%zu data candidates rejected)\n", (void*)detour, rejected);
+  if (!detour || dbg) {   // diagnostics: where did MelonLoader's four writes land, if anywhere?
+    for (int g = 0; g < 4; g++) { if (!gaddr[g]) continue; uintptr_t v = *(uintptr_t*)gaddr[g]; char a[300];
+      lg("  slot %s at %p = %p (%s)%s\n", gname[g], (void*)gaddr[g], (void*)v, nm(v, a, 300), changed_anon(gaddr[g]) ? " CHANGED" : ""); }
+    int shown = 0;
+    for (int i = 0; i < nsegs && shown < 60; i++) { if (segs[i].skip) continue;
+      for (size_t j = 0; j < segs[i].size / 8 && shown < 60; j++) { uintptr_t addr = segs[i].start + j * 8; char a[300];
+        if (!changed_anon(addr)) continue; uintptr_t v = *(uintptr_t*)addr;
+        if (!is_exec(v)) continue;
+        lg("  changed code slot %s+0x%zx (%p) -> %p %s delta-from-dlsym-slot=0x%lx\n", segs[i].img, (size_t)(j * 8), (void*)addr, (void*)v,
+           nm(v, a, 300), (long)((intptr_t)addr - (intptr_t)gaddr[0])); shown++; } }
+    lg("  %d changed code slots listed\n", shown);
+  }
 }
 
 // dyld image list with the main executable swapped to index 0 (MelonLoader assumes image[0] is the game).
 static int32_t main_idx = -1;
 static uint32_t remap(uint32_t i) {
+  pthread_mutex_lock(&hmu);
   if (main_idx < 0) { main_idx = 0;
     for (uint32_t k = 0; k < _dyld_image_count(); k++) { const struct mach_header *h = _dyld_get_image_header(k);
       if (h && h->filetype == MH_EXECUTE) { main_idx = (int32_t)k; break; } }
     lgv("main executable is dyld image %d\n", main_idx); }
-  if (i == 0) return (uint32_t)main_idx;
-  if (i == (uint32_t)main_idx) return 0;
+  uint32_t m = (uint32_t)main_idx;
+  pthread_mutex_unlock(&hmu);
+  if (i == 0) return m;
+  if (i == m) return 0;
   return i; }
 static const char* w_image_name(uint32_t i) { return _dyld_get_image_name(remap(i)); }
 // ProcessModulesFix sizes a module as sizeof(header)+sizeofcmds+sum(segment vmsize), which overshoots the real
@@ -166,27 +223,40 @@ static const char* w_image_name(uint32_t i) { return _dyld_get_image_name(remap(
 // page shorter and sizeofcmds pads the total back to exactly the image span (the walk only uses ncmds/cmdsize).
 static const struct mach_header *ga_fake = NULL;
 static const struct mach_header* fake_ga_header(const struct mach_header_64 *mh) {
-  if (ga_fake) return ga_fake;
-  size_t n = sizeof(*mh) + mh->sizeofcmds; struct mach_header_64 *c = malloc(n); memcpy(c, mh, n);
-  uint64_t lo = UINT64_MAX, hi = 0, sum = 0; struct segment_command_64 *le = NULL; uint8_t *p = (uint8_t*)(c + 1);
-  for (uint32_t k = 0; k < c->ncmds; k++) { struct load_command *lc = (void*)p;
-    if (lc->cmd == LC_SEGMENT_64) { struct segment_command_64 *sg = (void*)p;
-      if (strcmp(sg->segname, "__PAGEZERO")) { if (sg->vmaddr < lo) lo = sg->vmaddr; if (sg->vmaddr + sg->vmsize > hi) hi = sg->vmaddr + sg->vmsize; }
-      sum += sg->vmsize; if (!strcmp(sg->segname, "__LINKEDIT")) le = sg; }
-    p += lc->cmdsize; }
-  uint64_t span = hi - lo, cut = 0x1000;
-  if (!le || le->vmsize <= cut || sum - cut + sizeof(*c) > span) { lg("ga header: cannot fix (sum=0x%llx span=0x%llx)\n", sum, span); free(c); return ga_fake = (const void*)mh; }
-  le->vmsize -= cut; c->sizeofcmds = (uint32_t)(span - (sum - cut) - sizeof(*c));
-  lg("ga header: reported size now 0x%llx (span 0x%llx)\n", sizeof(*c) + c->sizeofcmds + sum - cut, span);
-  return ga_fake = (const void*)c; }
+  pthread_mutex_lock(&hmu);
+  if (!ga_fake) {
+    size_t n = sizeof(*mh) + mh->sizeofcmds; struct mach_header_64 *c = malloc(n);
+    if (!c) ga_fake = (const void*)mh;
+    else {
+      memcpy(c, mh, n);
+      uint64_t lo = UINT64_MAX, hi = 0, sum = 0; struct segment_command_64 *le = NULL; uint8_t *p = (uint8_t*)(c + 1);
+      for (uint32_t k = 0; k < c->ncmds; k++) { struct load_command *lc = (void*)p;
+        if (lc->cmd == LC_SEGMENT_64) { struct segment_command_64 *sg = (void*)p;
+          if (strcmp(sg->segname, "__PAGEZERO")) { if (sg->vmaddr < lo) lo = sg->vmaddr; if (sg->vmaddr + sg->vmsize > hi) hi = sg->vmaddr + sg->vmsize; }
+          sum += sg->vmsize; if (!strcmp(sg->segname, "__LINKEDIT")) le = sg; }
+        p += lc->cmdsize; }
+      uint64_t span = hi - lo, cut = 0x1000;
+      if (!le || le->vmsize <= cut || sum - cut + sizeof(*c) > span) {
+        lg("ga header: cannot fix (sum=0x%llx span=0x%llx)\n", sum, span); free(c); ga_fake = (const void*)mh; }
+      else {
+        le->vmsize -= cut; c->sizeofcmds = (uint32_t)(span - (sum - cut) - sizeof(*c));
+        lg("ga header: reported size now 0x%llx (span 0x%llx)\n", sizeof(*c) + c->sizeofcmds + sum - cut, span);
+        ga_fake = (const void*)c; }
+    }
+  }
+  const struct mach_header *r = ga_fake;
+  pthread_mutex_unlock(&hmu);
+  return r; }
 static const struct mach_header* w_image_header(uint32_t i) {
   uint32_t r = remap(i); const struct mach_header *h = _dyld_get_image_header(r); const char *n = _dyld_get_image_name(r);
   if (h && h->magic == MH_MAGIC_64 && n && strstr(n, "/GameAssembly.dylib")) return fake_ga_header((const void*)h);
   return h; }
 static intptr_t w_image_slide(uint32_t i) { return _dyld_get_image_vmaddr_slide(remap(i)); }
 
-// GameAssembly ships with full local symbols; look one up by a substring of its mangled name.
-static uintptr_t ga_sym(const char *needle) {
+// GameAssembly ships with full local symbols. Collect every function whose mangled name contains `needle`, skipping
+// compiler-split ".cold." fragments (they are not callable entry points). Returns the number found, which can exceed
+// `max`; only the first `max` addresses are stored.
+static int ga_syms(const char *needle, uintptr_t *out, int max) {
   for (uint32_t k = 0; k < _dyld_image_count(); k++) {
     const char *in = _dyld_get_image_name(k); if (!in || !strstr(in, "/GameAssembly.dylib")) continue;
     const struct mach_header_64 *mh = (const void*)_dyld_get_image_header(k); intptr_t slide = _dyld_get_image_vmaddr_slide(k);
@@ -198,10 +268,14 @@ static uintptr_t ga_sym(const char *needle) {
     if (!st || !le) return 0;
     uintptr_t lebase = le->vmaddr + slide - le->fileoff;
     const struct nlist_64 *sy = (const void*)(lebase + st->symoff); const char *strs = (const char*)(lebase + st->stroff);
-    for (uint32_t i = 0; i < st->nsyms; i++)
-      if ((sy[i].n_type & N_TYPE) == N_SECT && !(sy[i].n_type & N_STAB) && strstr(strs + sy[i].n_un.n_strx, needle))
-        return sy[i].n_value + slide;
-    return 0; }
+    int n = 0;
+    for (uint32_t i = 0; i < st->nsyms; i++) {
+      if ((sy[i].n_type & N_TYPE) != N_SECT || (sy[i].n_type & N_STAB)) continue;
+      const char *name = strs + sy[i].n_un.n_strx;
+      if (!strstr(name, needle) || strstr(name, ".cold.")) continue;
+      if (n < max) out[n] = sy[i].n_value + slide;
+      n++; }
+    return n; }
   return 0; }
 
 // Il2CppInterop's xref fallbacks pick the wrong function on this build (macOS clang, non-Master il2cpp). Each hook's
@@ -237,21 +311,27 @@ static int il_init(void) {
 #undef R
   return il_ok = 1; }
 // methodPointer -> MethodInfo* map (open addressing)
-static uintptr_t *mp_keys; static void **mp_vals; static size_t mp_cap;
+static uintptr_t *mp_keys; static void **mp_vals; static size_t mp_cap, mp_dropped;
 static void mp_put(uintptr_t k, void *v) { size_t i = (k >> 4) & (mp_cap - 1);
-  while (mp_keys[i] && mp_keys[i] != k) i = (i + 1) & (mp_cap - 1); if (!mp_keys[i]) { mp_keys[i] = k; mp_vals[i] = v; } }
+  for (size_t n = 0; n < mp_cap; n++, i = (i + 1) & (mp_cap - 1)) {
+    if (!mp_keys[i]) { mp_keys[i] = k; mp_vals[i] = v; return; }
+    if (mp_keys[i] == k) return; }
+  mp_dropped++; }   // table full: the method is simply unknown to the ABI check
 static void *mp_get(uintptr_t k) { if (!mp_cap) return NULL; size_t i = (k >> 4) & (mp_cap - 1);
-  while (mp_keys[i]) { if (mp_keys[i] == k) return mp_vals[i]; i = (i + 1) & (mp_cap - 1); } return NULL; }
+  for (size_t n = 0; n < mp_cap && mp_keys[i]; n++, i = (i + 1) & (mp_cap - 1)) if (mp_keys[i] == k) return mp_vals[i];
+  return NULL; }
 static void mp_add_class(void *k, int depth) {
   void *it = NULL, *m; while ((m = il.class_get_methods(k, &it))) { void *ptr = ((MethodInfoHead*)m)->methodPointer; if (ptr) mp_put((uintptr_t)ptr, m); }
   if (depth < 4) { void *it2 = NULL, *n; while ((n = il.class_get_nested_types(k, &it2))) mp_add_class(n, depth + 1); } }
 static void mp_build(void) {
   if (mp_cap || !il_init()) return;
   mp_cap = 1 << 20; mp_keys = calloc(mp_cap, sizeof *mp_keys); mp_vals = calloc(mp_cap, sizeof *mp_vals);
+  if (!mp_keys || !mp_vals) { lg("method map: out of memory, ABI check disabled\n"); free(mp_keys); free(mp_vals);
+    mp_keys = NULL; mp_vals = NULL; mp_cap = 0; il_ok = 0; return; }
   size_t na = 0; void **as = il.domain_get_assemblies(il.domain_get(), &na); size_t cnt = 0;
   for (size_t a = 0; a < na; a++) { void *img = il.assembly_get_image(as[a]); size_t nc = il.image_get_class_count(img);
     for (size_t c = 0; c < nc; c++) { mp_add_class(il.image_get_class(img, c), 0); cnt++; } }
-  lg("method map: %zu assemblies, %zu classes\n", na, cnt); }
+  lg("method map: %zu assemblies, %zu classes%s\n", na, cnt, mp_dropped ? " (table full, some methods dropped)" : ""); }
 
 // SysV classification of a by-value struct: returns size, fills cls[0..1] with 'I' (integer) or 'S' (sse) per eightbyte, 'M' if memory.
 #define IL2CPP_TYPE_R4 0x0c
@@ -304,22 +384,34 @@ __attribute__((visibility("default"))) void melonfix_set_abi_fixed(int v) { abi_
 
 typedef void (*hook_fn)(void **target, void *detour);
 static hook_fn real_hook_attach = NULL;
-static uintptr_t rt_wrong[NRETARGET], rt_right[NRETARGET]; static int syms_done = 0;
+#define MAX_WRONG 4   // every overload of the function the xref fallback can land on
+static uintptr_t rt_wrong[NRETARGET][MAX_WRONG], rt_right[NRETARGET]; static int rt_nwrong[NRETARGET]; static int syms_done = 0;
 static void name_addr(uintptr_t a, char *out, size_t n);
+static void resolve_retargets(void) {
+  syms_done = 1;
+  for (size_t i = 0; i < NRETARGET; i++) {
+    int nw = ga_syms(retargets[i].wrong, rt_wrong[i], MAX_WRONG); rt_nwrong[i] = nw > MAX_WRONG ? MAX_WRONG : nw;
+    uintptr_t r[2]; int nr = ga_syms(retargets[i].right, r, 2);
+    rt_right[i] = nr == 1 ? r[0] : 0;
+    if (!nw || nr != 1) lg("retarget for %s disabled: %d candidates for the wrong function, %d for the right one (need >=1 and exactly 1)\n",
+                           retargets[i].what, nw, nr); } }
 static void w_hook_attach(void **target, void *detour) {
-  if (!syms_done) { syms_done = 1;
-    for (size_t i = 0; i < NRETARGET; i++) { rt_wrong[i] = ga_sym(retargets[i].wrong); rt_right[i] = ga_sym(retargets[i].right);
-      if (!rt_wrong[i] || !rt_right[i]) lg("retarget symbols missing for %s (wrong=%p right=%p)\n", retargets[i].what, (void*)rt_wrong[i], (void*)rt_right[i]); } }
+  int skip = 0;
+  pthread_mutex_lock(&hmu);
+  if (!syms_done) resolve_retargets();
   if (target) {
-    for (size_t i = 0; i < NRETARGET; i++)
-      if (rt_wrong[i] && rt_right[i] && (uintptr_t)*target == rt_wrong[i]) {
-        lg("hook retarget %p -> %p: %s\n", *target, (void*)rt_right[i], retargets[i].what); *target = (void*)rt_right[i]; break; }
+    for (size_t i = 0; i < NRETARGET && rt_right[i]; i++)
+      for (int j = 0; j < rt_nwrong[i]; j++)
+        if ((uintptr_t)*target == rt_wrong[i][j]) {
+          lg("hook retarget %p -> %p: %s\n", *target, (void*)rt_right[i], retargets[i].what); *target = (void*)rt_right[i]; i = NRETARGET - 1; break; }
     char b[512]; name_addr((uintptr_t)*target, b, sizeof b); lgv("hook %s\n", b);
     mp_build(); void *m = mp_get((uintptr_t)*target); char why[512];
     if (m && !abi_fixed && abi_mismatch(m, why, sizeof why)) {
       lg("SKIP hook %s::%s (SysV struct ABI not supported by Il2CppInterop trampoline): %s\n",
          il.class_get_name(il.method_get_class(m)), il.method_get_name(m), why);
-      return; } }
+      skip = 1; } }
+  pthread_mutex_unlock(&hmu);
+  if (skip) return;
   real_hook_attach(target, detour); }
 
 // MelonLoader dlopen()s bare "GameAssembly.dylib"; dyld only searches DYLD_LIBRARY_PATH (the game root) for that.
@@ -459,7 +551,10 @@ __attribute__((constructor)) static void init(void) {
   setenv("DYLD_INSERT_LIBRARIES", "", 1);
   if (!is_game) return;
   { const char *e = getenv("MELONFIX_DEBUG"); dbg = e && *e && *e != '0'; }
-  lg("melonfix v13 loaded%s\n", dbg ? " (debug)" : "");
+  lg("melonfix v14 loaded%s\n", dbg ? " (debug)" : "");
+  { int p1 = -1, p2 = -1; uintptr_t heap = (uintptr_t)malloc(16); int m1 = is_mapped((uintptr_t)&init, &p1), m2 = is_mapped(heap, &p2);
+    lg("self-test: own code mapped=%d prot=%d, heap mapped=%d prot=%d, garbage mapped=%d\n", m1, p1, m2, p2, is_mapped(0x3f8000003f800000ULL, NULL));
+    free((void*)heap); }
   { const char *d = getenv("MELONFIX_DIR"); if (d) snprintf(thin_path, sizeof thin_path,
       "%s/_modkit/cache/GameAssembly.x86_64.dylib", d);
     if (d) snprintf(wrapper_path, sizeof wrapper_path, "%s/_modkit/cpp2il-wrapper.sh", d); }

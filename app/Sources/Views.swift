@@ -51,7 +51,6 @@ struct ContentView: View {
             .padding(28)
             .transition(.opacity)
             .animation(.easeInOut(duration: 0.25), value: model.screen)
-            if MoveToApplications.needed { MoveBanner() }
         }
     }
 }
@@ -126,6 +125,7 @@ struct NoGameScreen: View {
 
 struct RosettaScreen: View {
     @EnvironmentObject var model: AppModel
+    @State private var copied = false
     var body: some View {
         VStack(spacing: 22) {
             HStack(spacing: 16) {
@@ -134,8 +134,13 @@ struct RosettaScreen: View {
                 Image(systemName: "cpu.fill").font(.system(size: 40)).foregroundStyle(.purple)
                     .frame(width: 72, height: 72).background(RoundedRectangle(cornerRadius: 16).fill(Color.purple.opacity(0.12)))
             }
-            Heading(title: "One more piece: Rosetta", subtitle: "The mod loader runs through Apple’s Rosetta. macOS will ask for your password.")
-            BigButton(title: "Install Rosetta", symbol: "arrow.down.circle.fill") { model.installRosetta() }
+            Heading(title: "One more piece: Rosetta",
+                    subtitle: "The mod loader runs through Apple’s Rosetta. Install it yourself: paste this into Terminal and press Return.")
+            Text(AppModel.rosettaCommand).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                .padding(.horizontal, 14).padding(.vertical, 8)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.gray.opacity(0.14)))
+            BigButton(title: copied ? "Copied" : "Copy Command", symbol: "doc.on.doc") { model.copyRosettaCommand(); copied = true }
+            Waiting(text: "Continues by itself once Rosetta is installed")
         }
     }
 }
@@ -154,30 +159,19 @@ struct AskAccessScreen: View {
     }
 }
 
+/// Only the per-folder switch in Files & Folders is ever asked for. Full Disk Access is never suggested: it is far
+/// more than this app needs, and macOS re-asks for the folder on its own after the app is reopened.
 struct AccessDeniedScreen: View {
     @EnvironmentObject var model: AppModel
     let protection: Engine.Protection
-    @State private var notInList = false
 
     var body: some View {
         VStack(spacing: 18) {
-            Heading(title: "Let MacaqueLoader open your game folder")
-            Picker("", selection: $notInList) {
-                Text("Switch it on").tag(false)
-                Text("Not in the list?").tag(true)
-            }
-            .pickerStyle(.segmented).frame(width: 300).labelsHidden()
-
-            HStack(spacing: 18) {
-                SettingsReplica(appIcon: NSApp.applicationIconImage,
-                                title: notInList ? "Full Disk Access" : "Files & Folders",
-                                mode: notInList ? .drag : .toggle)
-                if notInList { DraggableAppIcon().transition(.scale.combined(with: .opacity)) }
-            }
-            .animation(.spring(response: 0.35), value: notInList)
-
+            Heading(title: "Let MacaqueLoader open your game folder",
+                    subtitle: "Not in the list? Quit MacaqueLoader and open it again: macOS asks once more.")
+            SettingsReplica(appIcon: NSApp.applicationIconImage, title: "Files & Folders", mode: .toggle)
             BigButton(title: "Open System Settings", symbol: "gearshape.fill") {
-                NSWorkspace.shared.open(notInList ? Engine.fullDiskAccessURL : protection.settingsURL)
+                NSWorkspace.shared.open(protection.settingsURL)
             }
             Waiting(text: "Continues by itself once it works")
         }
@@ -191,9 +185,10 @@ struct InstallScreen: View {
     var body: some View {
         VStack(spacing: 24) {
             Image(nsImage: model.gameIcon).resizable().frame(width: 96, height: 96).shadow(radius: 6, y: 3)
-            Heading(title: "Mods for Bloons TD 6")
+            Heading(title: model.needsUpdate ? "Update the mod files" : "Mods for Bloons TD 6",
+                    subtitle: model.needsUpdate ? "They were installed by MacaqueLoader \(model.installedVersion ?? "?"); this is \(Engine.appVersion). Updating re-downloads MelonLoader and .NET." : nil)
             ComponentTiles(progress: -1)
-            BigButton(title: "Install", symbol: "arrow.down.circle.fill") { model.install() }
+            BigButton(title: model.needsUpdate ? "Update" : "Install", symbol: "arrow.down.circle.fill") { model.install() }
             if model.untestedGameVersion { UntestedChip() }
         }
     }
@@ -438,47 +433,5 @@ struct FailedScreen: View {
                 .controlSize(.large)
             }
         }
-    }
-}
-
-// MARK: - Move to Applications
-
-enum MoveToApplications {
-    static var needed: Bool {
-        #if SNAPSHOTS
-        return false
-        #endif
-        let p = Bundle.main.bundlePath
-        return !(p.hasPrefix("/Applications/") || p.hasPrefix(NSHomeDirectory() + "/Applications/"))
-    }
-
-    static func move() -> Bool {
-        let src = Bundle.main.bundleURL
-        let dst = URL(fileURLWithPath: "/Applications").appendingPathComponent(src.lastPathComponent)
-        let fm = FileManager.default
-        do {
-            if fm.fileExists(atPath: dst.path) { try fm.trashItem(at: dst, resultingItemURL: nil) }
-            try fm.copyItem(at: src, to: dst)
-        } catch { return false }
-        Engine.run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", dst.path])
-        let task = Process(); task.executableURL = URL(fileURLWithPath: "/usr/bin/open"); task.arguments = ["-n", dst.path]
-        try? task.run()
-        if !src.path.contains("/AppTranslocation/") { try? fm.trashItem(at: src, resultingItemURL: nil) }
-        NSApp.terminate(nil)
-        return true
-    }
-}
-
-struct MoveBanner: View {
-    @State private var failed = false
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "arrow.down.app.fill").foregroundStyle(.tint)
-            Text(failed ? "Drag MacaqueLoader into your Applications folder." : "Keep MacaqueLoader in Applications").font(.callout)
-            Spacer()
-            if !failed { Button("Move to Applications") { failed = !MoveToApplications.move() }.controlSize(.small) }
-        }
-        .padding(.horizontal, 16).padding(.vertical, 9)
-        .background(Color.accentColor.opacity(0.1))
     }
 }

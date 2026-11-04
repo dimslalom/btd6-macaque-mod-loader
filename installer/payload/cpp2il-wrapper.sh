@@ -6,6 +6,8 @@
 # rebuilt whenever the game's GameAssembly.dylib is newer (game update).
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CACHE="$HERE/cache"
+# Cpp2IL is a separate tool: it must not see the game's injection variables.
+unset DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH
 REAL=""; GAMEAPP=""; ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in

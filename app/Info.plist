@@ -18,6 +18,5 @@
 	<key>NSDownloadsFolderUsageDescription</key><string>Your Steam library is in Downloads. MacaqueLoader installs and starts the mod loader next to Bloons TD 6.</string>
 	<key>NSRemovableVolumesUsageDescription</key><string>Your Steam library is on an external drive. MacaqueLoader installs and starts the mod loader next to Bloons TD 6.</string>
 	<key>NSNetworkVolumesUsageDescription</key><string>Your Steam library is on a network drive. MacaqueLoader installs and starts the mod loader next to Bloons TD 6.</string>
-	<key>NSAppleEventsUsageDescription</key><string>Used to install Rosetta (macOS asks for your password).</string>
 </dict>
 </plist>

@@ -151,7 +151,6 @@ enum Engine {
         (try? FileManager.default.contentsOfDirectory(atPath: url.path)) != nil
     }
 
-    static let fullDiskAccessURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!
 
     // MARK: Install state
 

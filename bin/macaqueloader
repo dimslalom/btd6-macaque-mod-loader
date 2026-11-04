@@ -53,7 +53,6 @@ case "$cmd" in
     src="$LIBEXEC/MacaqueLoader.app"; dst="$HOME/Applications/MacaqueLoader.app"
     [ -d "$src" ] || { echo "macaqueloader: the app isn't part of this install" >&2; exit 1; }
     mkdir -p "$HOME/Applications"; rm -rf "$dst"; cp -R "$src" "$dst"
-    /usr/bin/xattr -dr com.apple.quarantine "$dst" 2>/dev/null
     echo "MacaqueLoader is in ~/Applications."; exec /usr/bin/open "$dst";;
   install|repair)
     "$INSTALL" install "$@" | while IFS= read -r l; do
@@ -111,7 +110,7 @@ case "$cmd" in
   debug)
     g="$(game_dir)" || exit 1
     case "${1:-}" in
-      on) mkdir -p "$g/_modkit"; touch "$g/_modkit/debug"; echo "debug on (next launch opens a live log window)";;
+      on) mkdir -p "$g/_modkit"; touch "$g/_modkit/debug"; echo "debug on (verbose melonfix.log and crash backtraces on the next launch; follow with: macaqueloader logs)";;
       off) rm -f "$g/_modkit/debug"; echo "debug off";;
       *) echo "usage: macaqueloader debug on|off" >&2; exit 2;;
     esac;;

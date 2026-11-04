@@ -27,6 +27,7 @@ final class AppModel: ObservableObject {
     @Published var progress = 0.0
     @Published var progressLabel = ""
     @Published var installedVersion: String?
+    @Published var needsUpdate = false              // installed mod files come from another MacaqueLoader version
     @Published var untestedGameVersion = false
     @Published var debugMode = false
     @Published var prepSteps: [PrepStep] = PrepStep.all
@@ -63,12 +64,12 @@ final class AppModel: ObservableObject {
         guard readable else { screen = .accessDenied(Engine.protection(of: game)); watchForAccess(); return }
         defaults.set(Engine.buildID, forKey: "accessBuild")
         gameIcon = Engine.gameIcon(game)
-        guard await Task.detached(operation: { Engine.rosettaInstalled() }).value else { screen = .rosetta; return }
+        guard await Task.detached(operation: { Engine.rosettaInstalled() }).value else { screen = .rosetta; watchForRosetta(); return }
         refresh()
-        if !Engine.isInstalled(game) { screen = .install; return }
-        if installedVersion != Engine.appVersion, Engine.appVersion != "dev" {
-            await runEngine(["install", "--yes", "--game", game.path], label: "Updating mod files"); return
-        }
+        if !Engine.isInstalled(game) { needsUpdate = false; screen = .install; return }
+        // Nothing is downloaded without a click: a version mismatch shows the Install screen as "Update".
+        needsUpdate = installedVersion != Engine.appVersion && Engine.appVersion != "dev"
+        if needsUpdate { screen = .install; return }
         screen = Engine.gameRunning ? .playing : .home
         if Engine.gameRunning { watchGame() }
     }
@@ -124,12 +125,21 @@ final class AppModel: ObservableObject {
         check()
     }
 
-    func installRosetta() {
-        screen = .working("Installing Rosetta")
-        Task {
-            let script = "do shell script \"/usr/sbin/softwareupdate --install-rosetta --agree-to-license\" with administrator privileges"
-            _ = await Task.detached { Engine.run("/usr/bin/osascript", ["-e", script]) }.value
-            check()
+    /// Rosetta needs an administrator; the user runs this themselves in Terminal. The app never elevates.
+    static let rosettaCommand = "softwareupdate --install-rosetta --agree-to-license"
+
+    func copyRosettaCommand() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(Self.rosettaCommand, forType: .string)
+    }
+
+    /// Re-checks for Rosetta while the user installs it, and moves on by itself.
+    private func watchForRosetta() {
+        pollTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                if await Task.detached(operation: { Engine.rosettaInstalled() }).value { check(); return }
+            }
         }
     }
 
@@ -140,6 +150,7 @@ final class AppModel: ObservableObject {
     func uninstall(purge: Bool) {
         Task {
             guard let game else { return }
+            if let id = Bundle.main.bundleIdentifier { defaults.removePersistentDomain(forName: id) }   // leaves no preferences behind
             await runEngine(["uninstall", "--yes", "--game", game.path] + (purge ? ["--purge"] : []), label: "Removing mods")
         }
     }

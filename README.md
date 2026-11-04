@@ -63,6 +63,30 @@ macaqueloader app
 
 The second command puts MacaqueLoader in `~/Applications` and opens it.
 
+**From source** (until a release is published, this is the way)
+
+Needs the Xcode Command Line Tools and a .NET 8 or newer SDK. In Terminal:
+
+```bash
+xcode-select --install                      # skip if you already have it
+brew install dotnet-sdk                     # or any .NET 8+ SDK
+git clone https://github.com/dimslalom/btd6-macaque-mod-loader.git
+cd btd6-macaque-mod-loader
+scripts/build.sh
+tar -xzf dist/macaqueloader-1.0.0.tar.gz -C dist
+```
+
+Then either open the app, `dist/macaqueloader-1.0.0/libexec/MacaqueLoader.app`, and press **Install** then **Play**,
+or use the command line:
+
+```bash
+dist/macaqueloader-1.0.0/bin/macaqueloader install     # once; finds the game through Steam
+dist/macaqueloader-1.0.0/bin/macaqueloader launch      # every time you want mods
+```
+
+A locally built app isn't quarantined, so macOS opens it without the "can't be opened" step. Rosetta 2 is required;
+if it's missing, install it first with `softwareupdate --install-rosetta --agree-to-license`.
+
 ## How it goes
 
 <table>
@@ -121,7 +145,7 @@ The second command puts MacaqueLoader in `~/Applications` and opens it.
 | Mac | Apple Silicon (M1 or newer) |
 | macOS | 13 Ventura or newer (tested on macOS 27) |
 | Game | Bloons TD 6 from **Steam** (tested with 57.2) |
-| Rosetta 2 | Required; MacaqueLoader offers to install it |
+| Rosetta 2 | Required; MacaqueLoader shows the one-line Terminal command to install it |
 
 ## FAQ
 

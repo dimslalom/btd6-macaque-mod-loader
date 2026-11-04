@@ -8,7 +8,7 @@
 #   detect     print what was found, change nothing
 # Output lines for the app (anything else is log text):
 #   GAME <dir> | VERSION <btd6 version> | PROGRESS <0-100> <text> | WARN <text> | ERROR <code> <text> | DONE
-# Error codes: no-game, intel, no-rosetta, running, no-access, download, install
+# Error codes: no-game, intel, no-rosetta, running, no-access, download, checksum, install
 
 INSTALLER_VERSION="dev"
 ML_VERSION="0.7.3"
@@ -17,7 +17,9 @@ ML_SHA256="97290f7e44670cdbfdc408796cc0136138b6bca58b75f5b98a407d24896d6607"
 DOTNET_VERSION="6.0.36"
 DOTNET_URL="https://builds.dotnet.microsoft.com/dotnet/Runtime/6.0.36/dotnet-runtime-6.0.36-osx-x64.tar.gz"
 DOTNET_SHA256="4aa499f1e10e941bde250e1493bb4156791186790a34fb89c219e7765a9b97cd"
-MODHELPER_URL="https://github.com/gurrenm3/BTD-Mod-Helper/releases/latest/download/Btd6ModHelper.dll"
+MODHELPER_VERSION="3.6.10"
+MODHELPER_URL="https://github.com/gurrenm3/BTD-Mod-Helper/releases/download/3.6.10/Btd6ModHelper.dll"
+MODHELPER_SHA256="59714e5d2da68f80d752ccba3c8645221bfc78367f221e0ee5d9c45a5778c0aa"
 KNOWN_GOOD_GAME_VERSIONS="57.2"
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -74,7 +76,9 @@ GAMEVER="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/C
 echo "VERSION ${GAMEVER:-unknown}"
 [ "$MODE" = detect ] && { echo DONE; exit 0; }
 
-/usr/bin/pgrep -f "$BIN" >/dev/null && fail running "Bloons TD 6 is running. Quit it first."
+# pgrep -f takes a regex: escape the path so folders like "Games (1)" match literally.
+game_running() { /usr/bin/pgrep -f -- "$(printf '%s' "$BIN" | sed 's/[][\.*^$+?(){}|]/\\&/g')" >/dev/null; }
+game_running && fail running "Bloons TD 6 is running. Quit it first."
 
 # ---------- uninstall ----------
 if [ "$MODE" = uninstall ]; then
@@ -88,7 +92,7 @@ if [ "$MODE" = uninstall ]; then
   if [ -d "$GAME/MelonLoader" ] || [ -d "$GAME/dotnet" ]; then sleep 1; rm -rf "$GAME/MelonLoader" "$GAME/dotnet"; fi
   rmdir "$GAME/_modkit" 2>/dev/null
   if [ "$PURGE" = 1 ]; then progress 70 "Removing mods"; rm -rf "$GAME/Mods" "$GAME/Plugins" "$GAME/UserData" "$GAME/UserLibs"; fi
-  rm -f "$CONFIG_DIR/game-path"
+  rm -f "$CONFIG_DIR/game-path"; rmdir "$CONFIG_DIR" 2>/dev/null
   progress 100 "Removed"
   echo DONE; exit 0
 fi
@@ -96,6 +100,7 @@ fi
 # ---------- preflight ----------
 [ "$(uname -m)" = arm64 ] || fail intel "This Mac has an Intel processor. Only Apple Silicon Macs are supported."
 /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null || fail no-rosetta "Rosetta 2 is not installed."
+case "$GAME" in *:*) fail install "The game folder path contains a colon, which the launcher can't pass to dyld: $GAME";; esac
 case " $KNOWN_GOOD_GAME_VERSIONS " in *" ${GAMEVER%.*} "*|*" $GAMEVER "*) ;; *)
   warn "Tested with BTD6 $KNOWN_GOOD_GAME_VERSIONS; this is ${GAMEVER:-an unknown version}. Mods may need updates.";; esac
 confirm "Install mods into $GAME?" || exit 0
@@ -103,22 +108,23 @@ confirm "Install mods into $GAME?" || exit 0
 # ---------- downloads ----------
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/macaqueloader.XXXXXX")" || fail install "Couldn't create a temporary folder."
 trap 'rm -rf "$TMP"' EXIT
-fetch() {  # url dest [sha256]
-  echo "downloading $1"
-  /usr/bin/curl -fsSL --retry 3 --connect-timeout 20 -o "$2" "$1" || return 1
-  if [ -n "$3" ]; then
-    local got; got="$(/usr/bin/shasum -a 256 "$2" | awk '{print $1}')"
-    [ "$got" = "$3" ] || { echo "checksum mismatch for $1: $got"; return 1; }
+fetch() {  # what url dest sha256: downloads and verifies; a mismatch is its own error, never "check your connection"
+  echo "downloading $2"
+  /usr/bin/curl -fsSL --retry 3 --connect-timeout 20 -o "$3" "$2" || fail download "Downloading $1 failed. Check your internet connection."
+  local got; got="$(/usr/bin/shasum -a 256 "$3" | awk '{print $1}')"
+  if [ "$got" != "$4" ]; then
+    echo "checksum mismatch for $2: got $got, expected $4"; rm -f "$3"
+    fail checksum "The downloaded $1 doesn't match its expected checksum, so it wasn't installed. Try again later; if it keeps happening, report it."
   fi
 }
 progress 5 "Downloading MelonLoader"
-fetch "$ML_URL" "$TMP/ml.zip" "$ML_SHA256" || fail download "Downloading MelonLoader failed. Check your internet connection."
+fetch MelonLoader "$ML_URL" "$TMP/ml.zip" "$ML_SHA256"
 progress 35 "Downloading .NET"
-fetch "$DOTNET_URL" "$TMP/dotnet.tgz" "$DOTNET_SHA256" || fail download "Downloading .NET failed. Check your internet connection."
+fetch .NET "$DOTNET_URL" "$TMP/dotnet.tgz" "$DOTNET_SHA256"
 NEED_MH=0; [ -f "$GAME/Mods/Btd6ModHelper.dll" ] || NEED_MH=1
 if [ "$NEED_MH" = 1 ]; then
   progress 60 "Downloading BTD6 Mod Helper"
-  fetch "$MODHELPER_URL" "$TMP/Btd6ModHelper.dll" || fail download "Downloading BTD6 Mod Helper failed. Check your internet connection."
+  fetch "BTD6 Mod Helper" "$MODHELPER_URL" "$TMP/Btd6ModHelper.dll" "$MODHELPER_SHA256"
 fi
 
 # ---------- install ----------
@@ -137,9 +143,11 @@ step cp -f "$PAYLOAD/cpp2il-wrapper.sh" "$PAYLOAD/live-log.command" "$GAME/_modk
 chmod +x "$GAME/_modkit/cpp2il-wrapper.sh" "$GAME/_modkit/live-log.command"
 [ "$NEED_MH" = 1 ] && step cp -f "$TMP/Btd6ModHelper.dll" "$GAME/Mods/Btd6ModHelper.dll"
 
-# Downloaded files must not carry quarantine flags (dyld and Gatekeeper would refuse them).
+# The files we just installed must not carry quarantine flags (dyld and Gatekeeper would refuse them). Only those:
+# the user's own Mods and Plugins are left as they are.
 /usr/bin/xattr -dr com.apple.quarantine "$GAME/MelonLoader" "$GAME/dotnet" "$GAME/MelonLoader.Bootstrap.dylib" \
-  "$GAME/melonfix.dylib" "$GAME/Plugins" "$GAME/Mods" "$GAME/_modkit" 2>/dev/null
+  "$GAME/melonfix.dylib" "$GAME/Plugins/MelonMacFixes.dll" "$GAME/_modkit/cpp2il-wrapper.sh" "$GAME/_modkit/live-log.command" 2>/dev/null
+[ "$NEED_MH" = 1 ] && /usr/bin/xattr -d com.apple.quarantine "$GAME/Mods/Btd6ModHelper.dll" 2>/dev/null
 
 # State for the launcher's game-update check, the CLI and the app.
 echo "$KNOWN_GOOD_GAME_VERSIONS" > "$GAME/_modkit/known-good-versions"
@@ -151,6 +159,7 @@ date=$(date '+%Y-%m-%d %H:%M:%S')
 game_version=$GAMEVER
 melonloader=$ML_VERSION
 dotnet=$DOTNET_VERSION
+modhelper=$MODHELPER_VERSION
 melonfix=$(cat "$PAYLOAD/VERSION-melonfix" 2>/dev/null)
 macfixes=$(cat "$PAYLOAD/VERSION-macfixes" 2>/dev/null)
 EOF

@@ -21,7 +21,10 @@ without re-signing. Nothing inside the app bundle is changed. `melonfix.dylib` i
    through plthook, which reports success but writes to the correct `__got` slot plus a constant delta (0x4000 here),
    so Unity's `dlsym("il2cpp_init")` never reaches MelonLoader. melonfix interposes `dlsym`, snapshots non-system
    `__DATA` segments at startup, finds the four `__got` slots through the indirect symbol table, locates the delta
-   where all four misplaced writes landed, and routes UnityPlayer's `dlsym` calls through MelonLoader's detour.
+   where the misplaced writes landed, and routes UnityPlayer's `dlsym` calls through MelonLoader's detour. The `fopen`,
+   `dup2` and `vfprintf` hooks only exist when player-log capture is enabled, so a lone `dlsym` hook is accepted when it
+   is the only slot in UnityPlayer's data that changed to an anonymous executable pointer; a candidate that is not in
+   executable memory is never called.
 2. **dyld image 0 isn't the game.** With `DYLD_INSERT_LIBRARIES`, image 0 is the first injected library, but
    MelonLoader's ProcessModulesFix assumes it's the executable. melonfix answers `dlsym` for
    `_dyld_get_image_name/_header/_vmaddr_slide` with wrappers that swap the executable to index 0.
@@ -104,6 +107,13 @@ again.
   Nothing in Mod Helper hits them today; a mod that passes non-blittable structs through injected delegates or classes
   could.
 - Small non-blittable struct *return* values (16 bytes or less) in Harmony patches are still handled the Windows way.
+- Every hook ends in the Dobby build inside the stock MelonLoader 0.7.3 Bootstrap. [MelonLoader issue #1223](https://github.com/LavaGang/MelonLoader/issues/1223)
+  reports that this Dobby can misbehave under Rosetta (patches not seen by the translator, stub/prologue overlap, no
+  fallback when nothing is free within ±2 GB). Nothing here changes Dobby; whether a given game and layout hit it is
+  only known at runtime. The symptom is Harmony patches that never fire, or a hang at "Patching il2cpp_resolve_icall".
+- The two hook retargets match il2cpp symbols by substring. GameAssembly carries several `GetConstantValueFromBlob`
+  overloads and `.cold.` fragments; melonfix accepts every overload as a "wrong" hit, skips `.cold.` fragments and
+  requires exactly one "right" symbol, otherwise it logs and leaves the hook alone.
 
 ## Updates
 

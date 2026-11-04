@@ -19,7 +19,8 @@ ls "$GAME" >/dev/null 2>&1 || fail "no access to the game folder"
 [ -x "$BIN" ] || fail "BloonsTD6.app not found in $GAME"
 [ -f "$GAME/melonfix.dylib" ] && [ -f "$GAME/MelonLoader.Bootstrap.dylib" ] || fail "mod files missing, repair needed"
 
-pid="$(/usr/bin/pgrep -f "$BIN" | head -1)"
+# pgrep -f takes a regex: escape the path so folders like "Games (1)" match literally.
+pid="$(/usr/bin/pgrep -f -- "$(printf '%s' "$BIN" | sed 's/[][\.*^$+?(){}|]/\\&/g')" | head -1)"
 if [ -n "$pid" ]; then echo "RUNNING $pid"; /usr/bin/open -a "$APP"; exit 0; fi
 
 # BTD6 updates: Steam only replaces BloonsTD6.app, the mod files next to it keep working. On the first launch after
@@ -33,11 +34,15 @@ if [ -f "$STATE" ]; then
   read -r _ OLDM < "$STATE"
   [ "$OLDM" != "$NOWM" ] && UPDATED=1
 fi
+# Tested means the exact version, or a patch release of a tested version (57.2 covers 57.2.1, not 57.4). Same rule
+# as the installer and the app.
 TESTED=1
-if [ -f "$GAME/_modkit/known-good-versions" ] && ! grep -qwE -- "${NOWV%.*}|$NOWV" "$GAME/_modkit/known-good-versions"; then
+if [ -f "$GAME/_modkit/known-good-versions" ]; then
   TESTED=0
+  for v in $(cat "$GAME/_modkit/known-good-versions"); do
+    if [ "$NOWV" = "$v" ] || [ "${NOWV#"$v".}" != "$NOWV" ]; then TESTED=1; fi
+  done
 fi
-mkdir -p "$GAME/_modkit"; echo "${NOWV:-unknown} ${NOWM:-0}" > "$STATE"
 echo "STATE ${NOWV:-unknown} $UPDATED $TESTED"
 
 # Steam must be running and signed in first. Started on its own while Steam is closed, BTD6 asks Steam to start and
@@ -81,5 +86,7 @@ nohup /usr/bin/arch -x86_64 \
   -e MELONFIX_DEBUG="$DEBUG" \
   -e DOTNET_ROOT="$GAME/dotnet" \
   "$BIN" >> "$LOG" 2>&1 &
+# Recorded only once the game is actually starting, so a failed launch still counts as "updated" next time.
+mkdir -p "$GAME/_modkit"; echo "${NOWV:-unknown} ${NOWM:-0}" > "$STATE"
 echo "STARTED $!"
 exit 0
