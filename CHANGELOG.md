@@ -24,6 +24,23 @@ Security and robustness pass (no new features):
   starts, Cpp2IL children get no `DYLD_*` variables.
 - GitHub Actions are pinned by commit SHA.
 
+Fixes:
+
+- CLI: the `[y/N]` prompt of `install` and `uninstall` was never shown, so both looked frozen without `--yes`. `repair`
+  and `install` now use the saved game folder, a stale saved folder falls back to searching Steam, `--game` without a
+  value is an error instead of an endless loop, and the Apple Silicon check works in a shell running under Rosetta.
+- `--purge` and "Remove everything" also delete `Btd6ModHelper/` (mod settings), and `Jukebox/` when it is empty.
+- An interrupted install or repair now shows as needing an update, and the app can't be closed while one is running.
+- The first launch after a game update no longer reads the previous session's log, which skipped the Preparing screen.
+- Without Mod Helper the Preparing screen finishes, instead of reporting a normal quit as a crash.
+- Uninstalling from the app really leaves no preferences behind, and keeps them if the uninstall didn't run.
+- A double click on Play can't start two launchers, and attaching to a running game no longer reuses an old process ID.
+- The Cpp2IL wrapper re-thins GameAssembly when its timestamp changes in either direction (a rollback could keep a stale
+  copy).
+- melonfix v15: a disabled retarget no longer disables the ones after it, the "detour NOT found" log line prints the
+  real count, hooks only walk the symbol table in debug mode, and the log can't overwrite the managed crash stack.
+- BTD6 57.4 is on the tested list. CI runs shellcheck at `warning`, as `CONTRIBUTING.md` says.
+
 ## 1.0.0
 
 First release.
