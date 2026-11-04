@@ -3,7 +3,7 @@
 # Cpp2IL and passes the real binary as `--real <path>`.
 # Cpp2IL can't apply chained fixups to a slice of a universal binary (read-only stream), so we hand it a thinned
 # x86_64 GameAssembly plus explicit metadata path and Unity version. The thinned copy is cached in _modkit/cache and
-# rebuilt whenever the game's GameAssembly.dylib is newer (game update).
+# rebuilt whenever its timestamp stops matching the game's GameAssembly.dylib (game update or rollback).
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CACHE="$HERE/cache"
 # Cpp2IL is a separate tool: it must not see the game's injection variables.
@@ -25,7 +25,7 @@ SRC="$GAMEAPP/Contents/Frameworks/GameAssembly.dylib"
 META="$GAMEAPP/Contents/Resources/Data/il2cpp_data/Metadata/global-metadata.dat"
 UNITYVER="$(/usr/libexec/PlistBuddy -c 'Print CFBundleGetInfoString' "$GAMEAPP/Contents/Info.plist" 2>/dev/null | sed -E 's/.*version ([0-9]+\.[0-9]+\.[0-9]+[a-z][0-9]+).*/\1/')"
 
-# Extract the x86_64 slice from a universal (fat) Mach-O using only od + dd.
+# Extract the x86_64 slice from a universal (fat) Mach-O using only od, tail and head.
 be32() { od -An -tu1 -j "$2" -N4 "$1" | awk 'NF{print ($1*16777216)+($2*65536)+($3*256)+$4; exit}'; }
 thin_x86_64() {
   local src="$1" dst="$2" magic n i base cpu off size
@@ -44,9 +44,10 @@ thin_x86_64() {
 }
 mkdir -p "$CACHE"
 THIN="$CACHE/GameAssembly.x86_64.dylib"
-if [ ! -f "$THIN" ] || [ "$SRC" -nt "$THIN" ]; then
+if [ ! -f "$THIN" ] || [ "$SRC" -nt "$THIN" ] || [ "$SRC" -ot "$THIN" ]; then
   echo "[cpp2il-wrapper] thinning $SRC -> x86_64"
   thin_x86_64 "$SRC" "$THIN" || { echo "[cpp2il-wrapper] thinning failed"; exit 1; }
+  touch -r "$SRC" "$THIN"
 fi
 echo "[cpp2il-wrapper] binary=$THIN unity=$UNITYVER real=$REAL"
 exec "$REAL" --force-binary-path "$THIN" --force-metadata-path "$META" --force-unity-version "$UNITYVER" "${ARGS[@]}" </dev/null
