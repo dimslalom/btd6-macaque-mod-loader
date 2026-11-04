@@ -137,6 +137,8 @@ fi
 progress 70 "Installing MelonLoader"
 step() { "$@" || fail install "Installing failed at: $*"; }
 cd "$GAME" || fail install "Can't enter the game folder."
+# Written again at the end, so an interrupted install or repair shows up as needing an update.
+rm -f "$GAME/_modkit/install-info.txt"
 step /usr/bin/unzip -oq "$TMP/ml.zip" -x 'melonloader-launch.sh' 'MelonLoader.Bootstrap.dylib.dSYM/*' -d "$GAME"
 progress 80 "Installing .NET"
 rm -rf "$GAME/dotnet"; step mkdir -p "$GAME/dotnet"

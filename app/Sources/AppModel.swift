@@ -158,6 +158,7 @@ final class AppModel: ObservableObject {
     private func runEngine(_ args: [String], label: String) async {
         if Engine.gameRunning { screen = .failed("running"); return }
         progress = 0; progressLabel = label; screen = .working(label)
+        setEngineBusy(true); defer { setEngineBusy(false) }
         var error: String?
         let status = await Engine.script("install.sh", args) { line in
             if line.hasPrefix("PROGRESS ") {
@@ -171,6 +172,12 @@ final class AppModel: ObservableObject {
         }
         if status != 0 { screen = .failed(error ?? "Something went wrong. See the log for details."); return }
         check()
+    }
+
+    /// Quitting mid-install would kill the script and leave a half-written install, so the window can't be closed.
+    private func setEngineBusy(_ busy: Bool) {
+        AppDelegate.engineBusy = busy
+        NSApp.windows.forEach { $0.standardWindowButton(.closeButton)?.isEnabled = !busy }
     }
 
     // MARK: Play

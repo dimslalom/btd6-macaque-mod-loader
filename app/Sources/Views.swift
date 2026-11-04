@@ -22,7 +22,11 @@ struct MacaqueLoaderApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    static var engineBusy = false
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        Self.engineBusy ? .terminateCancel : .terminateNow
+    }
 }
 
 struct ContentView: View {
