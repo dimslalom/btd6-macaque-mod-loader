@@ -62,7 +62,7 @@ final class AppModel: ObservableObject {
         guard let game else { return }
         let readable = await Task.detached { Engine.canRead(game) }.value
         guard readable else { screen = .accessDenied(Engine.protection(of: game)); watchForAccess(); return }
-        defaults.set(Engine.buildID, forKey: "accessBuild")
+        if Engine.protection(of: game) != .none { defaults.set(Engine.buildID, forKey: "accessBuild") }
         gameIcon = Engine.gameIcon(game)
         guard await Task.detached(operation: { Engine.rosettaInstalled() }).value else { screen = .rosetta; watchForRosetta(); return }
         refresh()
@@ -150,12 +150,15 @@ final class AppModel: ObservableObject {
     func uninstall(purge: Bool) {
         Task {
             guard let game else { return }
-            if let id = Bundle.main.bundleIdentifier { defaults.removePersistentDomain(forName: id) }   // leaves no preferences behind
-            await runEngine(["uninstall", "--yes", "--game", game.path] + (purge ? ["--purge"] : []), label: "Removing mods")
+            await runEngine(["uninstall", "--yes", "--game", game.path] + (purge ? ["--purge"] : []), label: "Removing mods") {
+                // Leaves no preferences behind. Not check(): that would record folder access again straight away.
+                if let id = Bundle.main.bundleIdentifier { self.defaults.removePersistentDomain(forName: id) }
+                self.refresh(); self.needsUpdate = false; self.screen = .install
+            }
         }
     }
 
-    private func runEngine(_ args: [String], label: String) async {
+    private func runEngine(_ args: [String], label: String, onSuccess: (() -> Void)? = nil) async {
         if Engine.gameRunning { screen = .failed("running"); return }
         progress = 0; progressLabel = label; screen = .working(label)
         setEngineBusy(true); defer { setEngineBusy(false) }
@@ -171,7 +174,7 @@ final class AppModel: ObservableObject {
             }
         }
         if status != 0 { screen = .failed(error ?? "Something went wrong. See the log for details."); return }
-        check()
+        if let onSuccess { onSuccess() } else { check() }
     }
 
     /// Quitting mid-install would kill the script and leave a half-written install, so the window can't be closed.
