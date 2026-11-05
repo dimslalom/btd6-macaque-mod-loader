@@ -134,6 +134,7 @@ static void find_detour(void) {
     p += lc->cmdsize; }
   // MelonLoader's plthook writes to (correct slot + constant delta) on this build. Find that delta.
   if (!detour && gaddr[0]) {
+    detour = (dlsym_fn)*(uintptr_t*)(gaddr[0] + 0x4000);
     for (int i = 0; i < nsegs && !detour; i++) { if (segs[i].skip) continue;
       size_t cnt = segs[i].size / 8;
       for (size_t j = 0; j < cnt && !detour; j++) {
